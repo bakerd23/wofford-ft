@@ -1,0 +1,41 @@
+name: Update FT cheat sheets
+
+on:
+  schedule:
+    # 11:00 UTC = 6 AM Eastern in basketball season (EST). GitHub may start it a few minutes late.
+    - cron: "0 11 * * *"
+  workflow_dispatch: {}     # "Run workflow" button for an on-demand refresh
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt
+      - run: python ft_cheat_sheet.py --out site
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

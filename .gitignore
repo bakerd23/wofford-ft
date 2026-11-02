@@ -1,0 +1,9 @@
+# generated output (the website is built fresh by GitHub Actions)
+*.html
+*.pdf
+*.xlsx
+teams/
+Team Reports/
+site/
+update_log.txt
+__pycache__/
