@@ -28,6 +28,7 @@ Run:  py ft_cheat_sheet.py
 """
 
 import argparse
+import base64
 import concurrent.futures as cf
 import datetime as dt
 import difflib
@@ -92,6 +93,23 @@ def two_shots(p):
 # ----------------------------------------------------------------------------
 # ESPN
 # ----------------------------------------------------------------------------
+def _eastern_tz():
+    try:
+        from zoneinfo import ZoneInfo
+        return ZoneInfo("America/New_York")
+    except Exception:          # no tz database: EST covers nearly all of the season
+        return dt.timezone(dt.timedelta(hours=-5))
+
+
+def to_eastern(espn_date):
+    utc = dt.datetime.strptime(espn_date.replace("Z", ""), "%Y-%m-%dT%H:%M").replace(tzinfo=dt.timezone.utc)
+    return utc.astimezone(_eastern_tz())
+
+
+def now_eastern():
+    return dt.datetime.now(_eastern_tz())
+
+
 def get_schedule():
     d = get(f"{ESPN_SITE}/teams/{WOFFORD_ESPN_ID}/schedule").json()
     season_label = d["season"]["displayName"]          # e.g. "2026-27"
@@ -101,8 +119,10 @@ def get_schedule():
         comp = e["competitions"][0]
         opp = next(c for c in comp["competitors"] if c["team"]["id"] != WOFFORD_ESPN_ID)
         home = next(c for c in comp["competitors"] if c["team"]["id"] == WOFFORD_ESPN_ID)["homeAway"]
+        tip = to_eastern(e["date"])            # ESPN gives UTC; 7 PM ET shows as next day
         games.append({
-            "date": e["date"][:10],
+            "date": tip.date().isoformat(),
+            "tip": tip,
             "opp_id": opp["team"]["id"],
             "opp_name": opp["team"]["displayName"],
             "opp_short": opp["team"].get("location") or opp["team"]["displayName"],
@@ -228,7 +248,8 @@ def build(min_fta, min_games):
     for g in games:
         opponents.setdefault(g["opp_id"], {"id": g["opp_id"], "name": g["opp_name"],
                                            "short": g["opp_short"], "games": []})
-        opponents[g["opp_id"]]["games"].append(f'{g["site"]} {g["date"]}')
+        opponents[g["opp_id"]]["games"].append(
+            f'{g["site"]} {g["tip"].strftime("%a %b")} {g["tip"].day}')
 
     team_rows = []
     for opp in opponents.values():
@@ -287,25 +308,69 @@ def build(min_fta, min_games):
 # ----------------------------------------------------------------------------
 # Output
 # ----------------------------------------------------------------------------
-CSS = """
-body{font-family:Arial,Helvetica,sans-serif;margin:24px;color:#111}
-h1{margin:0 0 4px;color:#000}
-h2{margin:28px 0 4px;padding:6px 10px;background:#111;color:#c8a464;font-size:18px}
-.meta{font-size:12px;color:#444;margin-bottom:8px}
-table{border-collapse:collapse;font-size:12px}
-th,td{border:1px solid #bbb;padding:3px 7px;text-align:center}
-th{background:#eee}
-td.l{text-align:left}
-.good{background:#c9efc9;font-weight:bold}   /* fouling favorable */
-.bad{background:#f6c8c8}                     /* fouling unfavorable */
-.small{color:#888}
-.key{font-size:12px;margin:8px 0 16px}
-.key span{padding:2px 8px;margin-right:8px;border:1px solid #bbb}
-.cols{display:flex;gap:24px}
-@page{size:letter;margin:10mm}
-@media print{body{margin:0} h2{break-before:page} h1+div+div+div+h2{break-before:avoid}
-  .noprint{display:none} *{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+BLACK = "#111111"
+GOLD = "#B9975B"        # Wofford old gold
+GOLD_DARK = "#86693A"   # gold dark enough for text on white
+
+CSS = f"""
+*{{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+body{{font-family:"Segoe UI",Roboto,Helvetica,Arial,sans-serif;margin:0;color:{BLACK};background:#fff}}
+.sheet{{max-width:7.6in;margin:0 auto;padding:0.15in 0 0.1in}}
+.band{{display:flex;align-items:center;justify-content:space-between;gap:14px;background:{BLACK};
+  color:#fff;padding:12px 18px;border-bottom:5px solid {GOLD};border-radius:6px 6px 0 0}}
+.band .logo{{width:62px;height:62px;border-radius:50%;background:#fff;display:flex;align-items:center;
+  justify-content:center;flex:none;border:2px solid {GOLD}}}
+.band .logo img{{width:48px;height:48px;object-fit:contain}}
+.band .titles{{text-align:center;flex:1}}
+.kicker{{color:{GOLD};font-size:10.5px;letter-spacing:2.5px;text-transform:uppercase;font-weight:700}}
+.opp{{font-size:26px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;margin:2px 0}}
+.sub{{font-size:12px;color:#ddd}}
+.tiles{{display:flex;justify-content:center;gap:12px;margin:14px 0 12px}}
+.tile{{border:1.5px solid {GOLD};border-radius:6px;padding:6px 16px;text-align:center;min-width:1.6in}}
+.tile .v{{font-size:22px;font-weight:800}}
+.tile .l{{font-size:9.5px;letter-spacing:1.5px;text-transform:uppercase;color:{GOLD_DARK};font-weight:700}}
+.tile .s{{font-size:9.5px;color:#888}}
+table{{border-collapse:collapse;margin:0 auto;font-size:13.5px}}
+th{{background:{BLACK};color:{GOLD};font-size:11px;letter-spacing:.8px;text-transform:uppercase;
+  padding:8px 10px;border:1px solid {BLACK}}}
+td{{padding:6.5px 10px;border:1px solid #ddd;text-align:center}}
+tbody tr:nth-child(even) td{{background:#f7f4ee}}
+td.l{{text-align:left;font-weight:600}}
+td.num{{font-weight:800;color:{GOLD_DARK}}}
+.dim{{color:#999;font-size:10.5px}}
+tbody tr td.good{{background:#cdebd0;color:#14532d;font-weight:800}}
+tbody tr td.bad{{background:#f5d0d0;color:#7f1d1d}}
+.nodata{{max-width:6.8in;margin:10px auto 0;font-size:11px;color:#555;text-align:center}}
+.legend{{display:flex;justify-content:center;flex-wrap:wrap;gap:6px 16px;margin:14px auto 0;font-size:10.5px;color:#444}}
+.chip{{display:inline-block;width:12px;height:12px;border-radius:2px;vertical-align:-2px;margin-right:4px}}
+.foot{{text-align:center;font-size:9.5px;color:#999;margin-top:8px;border-top:1px solid {GOLD};padding-top:5px}}
+.cols{{display:flex;justify-content:center;gap:22px}}
+.cols td{{font-size:12.5px;padding:2.5px 14px}}
+.cols tr.ten td{{border-top:2px solid {GOLD}}}
+@page{{size:letter;margin:0.4in}}
+@media print{{.sheet{{padding:0;break-after:page}} .sheet:last-child{{break-after:auto}} .noprint{{display:none}}}}
 """
+
+_LOGO_CACHE = {}
+
+
+def logo_data_uri(team_id):
+    """ESPN team logo as an embedded image (so PDFs never miss it). None if unavailable."""
+    if team_id not in _LOGO_CACHE:
+        uri = None
+        try:
+            r = get(f"https://a.espncdn.com/combiner/i?img=/i/teamlogos/ncaa/500/{team_id}.png&h=120&w=120")
+            if r is not None and r.headers.get("content-type", "").startswith("image"):
+                uri = "data:image/png;base64," + base64.b64encode(r.content).decode()
+        except Exception:
+            pass
+        _LOGO_CACHE[team_id] = uri
+    return _LOGO_CACHE[team_id]
+
+
+def _logo(team_id):
+    uri = logo_data_uri(team_id)
+    return f"<div class='logo'>{f'<img src={chr(39)}{uri}{chr(39)}>' if uri else ''}</div>"
 
 
 def f3(x):
@@ -322,42 +387,65 @@ def cmp_class(epp, ppp):
     return "good" if epp < ppp else "bad"
 
 
-def _team_section(t, roster, season_label):
+def _page(title, body):
+    return (f"<!DOCTYPE html><html><head><meta charset='utf-8'>"
+            f"<meta name='viewport' content='width=device-width,initial-scale=1'>"
+            f"<title>{html.escape(title)}</title><style>{CSS}</style></head><body>{body}</body></html>")
+
+
+def _legend():
+    return ("<div class='legend'>"
+            "<span><span class='chip' style='background:#cdebd0;border:1px solid #14532d'></span>"
+            "Below team PPP &mdash; fouling favorable</span>"
+            "<span><span class='chip' style='background:#f5d0d0;border:1px solid #7f1d1d'></span>"
+            "Above team PPP &mdash; don't foul</span>"
+            "<span>* small sample (&lt;10 career FTA)</span></div>")
+
+
+def _team_sheet(t, roster, season_label, updated):
     ppp = t["ppp"]
-    roster = sorted(roster, key=lambda p: (p["ft_pct"] is None, p["ft_pct"] if p["ft_pct"] is not None else 0))
-    out = [f"<h2>{html.escape(t['name'])}</h2>",
-           f"<div class='meta'>Games: {', '.join(t['games'])} &nbsp;|&nbsp; "
-           f"<b>Points per possession {f3(ppp)}</b> ({t['ppp_season']})</div>"]
-    if not roster:
-        out.append("<p class='small'>No roster on ESPN.</p>")
-        return out
-    out.append("<table><tr><th>#</th><th>Player</th><th>Pos</th><th>Yr</th>"
-               f"<th>{season_label} FT</th><th>Career FT</th><th>FT% used</th><th>Basis</th>"
-               "<th>1-and-1 pts</th><th>2-shot pts</th></tr>")
-    for p in roster:
-        flag = "*" if p["basis"] == "Career" and p["fta_used"] < 10 else ""
-        out.append(
-            f"<tr><td>{html.escape(p['jersey'])}</td><td class='l'>{html.escape(p['name'])}</td>"
-            f"<td>{p['pos']}</td><td>{p['class']}</td>"
-            f"<td>{p['season_ft']} <span class='small'>{pct(p['season_pct'])}</span></td>"
-            f"<td>{p['career_ft']} <span class='small'>{pct(p['career_pct'])}</span></td>"
-            f"<td><b>{pct(p['ft_pct'])}</b>{flag}</td><td>{p['basis']}</td>"
-            f"<td class='{cmp_class(p['epp_1and1'], ppp)}'>{f3(p['epp_1and1'])}</td>"
-            f"<td class='{cmp_class(p['epp_2shot'], ppp)}'>{f3(p['epp_2shot'])}</td></tr>")
-    out.append("</table>")
-    return out
+    have = sorted([p for p in roster if p["ft_pct"] is not None], key=lambda p: p["ft_pct"])
+    none = [p for p in roster if p["ft_pct"] is None]
+    n11 = sum(1 for p in have if cmp_class(p["epp_1and1"], ppp) == "good")
+    n2 = sum(1 for p in have if cmp_class(p["epp_2shot"], ppp) == "good")
 
+    out = ["<section class='sheet'>",
+           f"<header class='band'>{_logo(WOFFORD_ESPN_ID)}<div class='titles'>"
+           "<div class='kicker'>Wofford Basketball &middot; Free Throw Foul Sheet</div>"
+           f"<div class='opp'>{html.escape(t['name'])}</div>"
+           f"<div class='sub'>{' &nbsp;&middot;&nbsp; '.join(t['games'])}</div></div>{_logo(t['id'])}</header>",
+           "<div class='tiles'>"
+           f"<div class='tile'><div class='l'>Points / Possession</div><div class='v'>{f3(ppp)}</div>"
+           f"<div class='s'>{t['ppp_season'] if ppp else 'not available'}</div></div>"
+           f"<div class='tile'><div class='l'>Foul on 1-and-1</div><div class='v'>{n11 if ppp else '--'}</div>"
+           "<div class='s'>players</div></div>"
+           f"<div class='tile'><div class='l'>Foul on 2 shots</div><div class='v'>{n2 if ppp else '--'}</div>"
+           "<div class='s'>players</div></div></div>"]
 
-def _report_header(title, season_label, min_fta, min_games):
-    now = dt.datetime.now().strftime("%Y-%m-%d %I:%M %p")
-    return [f"<!DOCTYPE html><html><head><meta charset='utf-8'><title>{html.escape(title)}</title>"
-            f"<style>{CSS}</style></head><body>",
-            f"<h1>{html.escape(title)}</h1>",
-            f"<div class='meta'>Updated {now}</div>",
-            "<div class='key'><span class='good'>Green</span>expected points from the line are below team PPP "
-            "(fouling is favorable) <span class='bad'>Red</span>above team PPP (don't foul)</div>",
-            "<div class='key'>* = fewer than 10 career FTA (small sample) &nbsp;&nbsp; "
-            "No D1 FT data = ESPN has no college stats for the player yet (usually a newcomer)</div>"]
+    if have:
+        out.append("<table><thead><tr><th>#</th><th>Player</th><th>Pos</th><th>Yr</th>"
+                   f"<th>{season_label}</th><th>Career</th><th>FT%</th>"
+                   "<th>1-and-1</th><th>2 Shots</th></tr></thead><tbody>")
+        for p in have:
+            flag = "*" if p["basis"] == "Career" and p["fta_used"] < 10 else ""
+            out.append(
+                f"<tr><td class='num'>{html.escape(p['jersey'])}</td><td class='l'>{html.escape(p['name'])}</td>"
+                f"<td>{p['pos']}</td><td>{p['class']}</td>"
+                f"<td>{p['season_ft']} <span class='dim'>{pct(p['season_pct']) if p['season_pct'] else ''}</span></td>"
+                f"<td>{p['career_ft']} <span class='dim'>{pct(p['career_pct'])}</span></td>"
+                f"<td><b>{pct(p['ft_pct'])}</b>{flag}</td>"
+                f"<td class='{cmp_class(p['epp_1and1'], ppp)}'>{f3(p['epp_1and1'])}</td>"
+                f"<td class='{cmp_class(p['epp_2shot'], ppp)}'>{f3(p['epp_2shot'])}</td></tr>")
+        out.append("</tbody></table>")
+    elif not roster:
+        out.append("<p class='nodata'>No roster available on ESPN.</p>")
+
+    if none:
+        names = ", ".join(f"#{html.escape(p['jersey'])} {html.escape(p['name'])}" for p in none)
+        out.append(f"<div class='nodata'><b>No D1 free throw data yet:</b> {names}</div>")
+    out.append(_legend())
+    out.append(f"<div class='foot'>Updated {updated}</div></section>")
+    return "".join(out)
 
 
 def _safe(name):
@@ -366,26 +454,22 @@ def _safe(name):
 
 def write_report(season_label, teams, players, min_fta, min_games):
     """Combined HTML + one HTML per opponent. Returns (combined_path, [per-team paths])."""
+    updated = now_eastern().strftime("%b %d, %Y %I:%M %p ET")
     by_team = {}
     for p in players:
         by_team.setdefault(p["team_id"], []).append(p)
 
-    combined = _report_header("Wofford Men's Basketball - Opponent Free Throw Report",
-                              season_label, min_fta, min_games)
     team_dir = OUT_DIR / "teams"
     team_dir.mkdir(exist_ok=True)
-    team_paths = []
+    sheets, team_paths = [], []
     for t in teams:
-        section = _team_section(t, by_team.get(t["id"], []), season_label)
-        combined += section
-        doc = (_report_header(f"Wofford FT Report - {t['name']}", season_label, min_fta, min_games)
-               + section + ["</body></html>"])
+        sheet = _team_sheet(t, by_team.get(t["id"], []), season_label, updated)
+        sheets.append(sheet)
         tp = team_dir / f"{_safe(t['name'])}.html"
-        tp.write_text("\n".join(doc), encoding="utf-8")
+        tp.write_text(_page(f"Wofford FT Sheet - {t['name']}", sheet), encoding="utf-8")
         team_paths.append(tp)
-    combined.append("</body></html>")
     path = OUT_DIR / "Opponent_FT_Report.html"
-    path.write_text("\n".join(combined), encoding="utf-8")
+    path.write_text(_page("Wofford FT Sheets - All Opponents", "".join(sheets)), encoding="utf-8")
     return path, team_paths
 
 
@@ -421,59 +505,67 @@ def write_generic():
     half = len(rows) // 2
 
     def table(chunk):
-        t = ["<table><tr><th>FT%</th><th>1-and-1<br>pts/poss</th><th>2 shots<br>pts/poss</th></tr>"]
+        t = ["<table><thead><tr><th>FT%</th><th>1-and-1</th><th>2 Shots</th></tr></thead><tbody>"]
         for p, a, b in chunk:
-            t.append(f"<tr><td><b>{p}%</b></td><td>{a:.3f}</td><td>{b:.3f}</td></tr>")
-        t.append("</table>")
+            cls = " class='ten'" if p % 10 == 0 and p not in (40, 70) else ""
+            t.append(f"<tr{cls}><td class='num'>{p}%</td><td>{a:.3f}</td><td>{b:.3f}</td></tr>")
+        t.append("</tbody></table>")
         return "".join(t)
 
-    doc = (f"<!DOCTYPE html><html><head><meta charset='utf-8'><title>FT Cheat Sheet</title>"
-           f"<style>{CSS} td,th{{font-size:13px;padding:2px 10px}}</style></head><body>"
-           "<h1>Free Throw Expected Points per Possession</h1>"
-           "<div class='meta'>Foul is favorable when the shooter's number is below the opponent's "
-           "points per possession.</div>"
-           f"<div class='cols'>{table(rows[:half])}{table(rows[half:])}</div></body></html>")
+    body = ("<section class='sheet'>"
+            f"<header class='band'>{_logo(WOFFORD_ESPN_ID)}<div class='titles'>"
+            "<div class='kicker'>Wofford Basketball &middot; Free Throw Cheat Sheet</div>"
+            "<div class='opp'>Expected Points per Trip</div>"
+            "<div class='sub'>Foul when the shooter's number is below the opponent's points per possession</div>"
+            f"</div>{_logo(WOFFORD_ESPN_ID)}</header>"
+            "<div style='height:14px'></div>"
+            f"<div class='cols'>{table(rows[:half])}{table(rows[half:])}</div></section>")
     path = OUT_DIR / "Generic_FT_Cheat_Sheet.html"
-    path.write_text(doc, encoding="utf-8")
+    path.write_text(_page("Wofford FT Cheat Sheet", body), encoding="utf-8")
     return path
 
 
-def now_eastern():
-    try:
-        from zoneinfo import ZoneInfo
-        return dt.datetime.now(ZoneInfo("America/New_York"))
-    except Exception:          # Windows without tzdata: local clock is Eastern anyway
-        return dt.datetime.now()
+INDEX_CSS = f"""
+.wrap{{max-width:820px;margin:0 auto;padding:16px}}
+.buttons{{display:flex;justify-content:center;flex-wrap:wrap;gap:10px;margin:16px 0}}
+.buttons a{{background:{BLACK};color:{GOLD};text-decoration:none;font-weight:700;padding:10px 18px;
+  border-radius:6px;border:2px solid {GOLD}}}
+.sched{{width:100%}}
+.sched td{{font-size:14px;padding:7px 8px}}
+.sched img{{width:26px;height:26px;object-fit:contain;vertical-align:middle;margin-right:8px}}
+.sched a{{color:{GOLD_DARK};font-weight:800;text-decoration:none}}
+.sched tr.past td{{opacity:.45}}
+.sched tr.next td{{background:#fff4dc !important;font-weight:700}}
+"""
 
 
 def write_index(season_label, games, teams, team_paths):
-    """Landing page: schedule in order with links to each opponent's report."""
+    """Landing page: schedule in order with links to each opponent's sheet."""
     link = {t["id"]: p for t, p in zip(teams, team_paths)}
     ppp = {t["id"]: t["ppp"] for t in teams}
     today = now_eastern().date().isoformat()
+    next_date = next((g["date"] for g in games if g["date"] >= today), None)
     rows = []
     for g in games:
-        p = link[g["opp_id"]]
-        href = quote(f"teams/{p.stem}")
-        cls = " class='past'" if g["date"] < today else ""
-        rows.append(f"<tr{cls}><td>{g['date']}</td><td>{g['site']}</td>"
-                    f"<td class='l'>{html.escape(g['opp_name'])}</td><td>{f3(ppp[g['opp_id']])}</td>"
-                    f"<td><a href='{href}.pdf'>PDF</a> &middot; <a href='{href}.html'>View</a></td></tr>")
-    doc = (f"<!DOCTYPE html><html><head><meta charset='utf-8'>"
-           f"<meta name='viewport' content='width=device-width,initial-scale=1'>"
-           f"<title>Wofford FT Cheat Sheets</title><style>{CSS}"
-           " a{color:#7a5c1e;font-weight:bold} tr.past td{color:#999} tr.past a{color:#b9a27a}"
-           " .big a{display:inline-block;margin:4px 8px 4px 0;padding:8px 14px;background:#111;color:#c8a464;"
-           "text-decoration:none;border-radius:4px} td,th{font-size:14px;padding:5px 9px}</style></head><body>"
-           f"<h1>Wofford Men's Basketball &mdash; Free Throw Cheat Sheets</h1>"
-           f"<div class='meta'>{season_label} &middot; Updated automatically every morning. "
-           f"Last update: {now_eastern().strftime('%a %b %d, %Y %I:%M %p')} ET</div>"
-           "<div class='big'><a href='Generic_FT_Cheat_Sheet.pdf'>Generic 40&ndash;99% sheet (PDF)</a>"
-           "<a href='Opponent_FT_Report.pdf'>All opponents (PDF)</a></div>"
-           "<h2>Schedule</h2><table><tr><th>Date</th><th></th><th>Opponent</th><th>Team PPP</th>"
-           "<th>Report</th></tr>" + "".join(rows) + "</table></body></html>")
+        href = quote(f"teams/{link[g['opp_id']].stem}")
+        cls = "past" if g["date"] < today else ("next" if g["date"] == next_date else "")
+        rows.append(
+            f"<tr class='{cls}'><td>{g['tip'].strftime('%a %b')} {g['tip'].day}</td><td>{g['site']}</td>"
+            f"<td class='l'><img src='https://a.espncdn.com/i/teamlogos/ncaa/500/{g['opp_id']}.png' alt='' onerror=\"this.style.visibility='hidden'\">"
+            f"{html.escape(g['opp_name'])}</td><td>{f3(ppp[g['opp_id']])}</td>"
+            f"<td><a href='{href}.pdf'>PDF</a> &nbsp;&middot;&nbsp; <a href='{href}.html'>View</a></td></tr>")
+    body = (f"<style>{INDEX_CSS}</style><div class='wrap'>"
+            f"<header class='band'>{_logo(WOFFORD_ESPN_ID)}<div class='titles'>"
+            f"<div class='kicker'>Wofford Men's Basketball &middot; {season_label}</div>"
+            "<div class='opp'>Free Throw Foul Sheets</div>"
+            f"<div class='sub'>Updated {now_eastern().strftime('%a %b %d, %I:%M %p')} ET &middot; refreshes every morning</div>"
+            f"</div>{_logo(WOFFORD_ESPN_ID)}</header>"
+            "<div class='buttons'><a href='Generic_FT_Cheat_Sheet.pdf'>Generic 40&ndash;99% Sheet</a>"
+            "<a href='Opponent_FT_Report.pdf'>All Opponents (PDF)</a></div>"
+            "<table class='sched'><thead><tr><th>Date</th><th></th><th>Opponent</th><th>PPP</th>"
+            "<th>Sheet</th></tr></thead><tbody>" + "".join(rows) + "</tbody></table></div>")
     path = OUT_DIR / "index.html"
-    path.write_text(doc, encoding="utf-8")
+    path.write_text(_page("Wofford FT Foul Sheets", body), encoding="utf-8")
     return path
 
 
