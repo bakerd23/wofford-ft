@@ -26,7 +26,7 @@ jobs:
         with:
           python-version: "3.13"
       - run: pip install -r requirements.txt
-      - run: python ft_cheat_sheet.py --out site
+      - run: python ft_cheat_sheet.py --out site --no-excel
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site

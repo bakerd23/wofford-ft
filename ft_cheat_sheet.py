@@ -327,8 +327,7 @@ def _team_section(t, roster, season_label):
     roster = sorted(roster, key=lambda p: (p["ft_pct"] is None, p["ft_pct"] if p["ft_pct"] is not None else 0))
     out = [f"<h2>{html.escape(t['name'])}</h2>",
            f"<div class='meta'>Games: {', '.join(t['games'])} &nbsp;|&nbsp; "
-           f"<b>PPP {f3(ppp)}</b> &nbsp; ({t['ppg'] or '--'} pts / {t['pace'] or '--'} poss per game) "
-           f"({t['ppp_season']}, TeamRankings: {html.escape(t['tr_name'] or 'not listed')})</div>"]
+           f"<b>Points per possession {f3(ppp)}</b> ({t['ppp_season']})</div>"]
     if not roster:
         out.append("<p class='small'>No roster on ESPN.</p>")
         return out
@@ -354,14 +353,10 @@ def _report_header(title, season_label, min_fta, min_games):
     return [f"<!DOCTYPE html><html><head><meta charset='utf-8'><title>{html.escape(title)}</title>"
             f"<style>{CSS}</style></head><body>",
             f"<h1>{html.escape(title)}</h1>",
-            f"<div class='meta'>Generated {now}. Player FT%: {season_label} once a player has "
-            f"{min_fta}+ FTA this season, otherwise career (all schools). Team PPP = TeamRankings points per game "
-            f"&divide; possessions per game: {season_label} once a team has {min_games}+ games, "
-            f"otherwise {PRIOR_SEASON_LABEL}.</div>",
+            f"<div class='meta'>Updated {now}</div>",
             "<div class='key'><span class='good'>Green</span>expected points from the line are below team PPP "
             "(fouling is favorable) <span class='bad'>Red</span>above team PPP (don't foul)</div>",
-            "<div class='key'>1-and-1 = p + p&sup2; &nbsp;&nbsp; 2 shots = 2p &nbsp;&nbsp; "
-            "* = fewer than 10 career FTA (small sample) &nbsp;&nbsp; "
+            "<div class='key'>* = fewer than 10 career FTA (small sample) &nbsp;&nbsp; "
             "No D1 FT data = ESPN has no college stats for the player yet (usually a newcomer)</div>"]
 
 
@@ -435,8 +430,8 @@ def write_generic():
     doc = (f"<!DOCTYPE html><html><head><meta charset='utf-8'><title>FT Cheat Sheet</title>"
            f"<style>{CSS} td,th{{font-size:13px;padding:2px 10px}}</style></head><body>"
            "<h1>Free Throw Expected Points per Possession</h1>"
-           "<div class='meta'>1-and-1 = p + p&sup2; &nbsp;|&nbsp; 2 shots = 2p &nbsp;|&nbsp; "
-           "Foul is favorable when the shooter's number is below the opponent's points per possession.</div>"
+           "<div class='meta'>Foul is favorable when the shooter's number is below the opponent's "
+           "points per possession.</div>"
            f"<div class='cols'>{table(rows[:half])}{table(rows[half:])}</div></body></html>")
     path = OUT_DIR / "Generic_FT_Cheat_Sheet.html"
     path.write_text(doc, encoding="utf-8")
@@ -474,8 +469,7 @@ def write_index(season_label, games, teams, team_paths):
            f"<div class='meta'>{season_label} &middot; Updated automatically every morning. "
            f"Last update: {now_eastern().strftime('%a %b %d, %Y %I:%M %p')} ET</div>"
            "<div class='big'><a href='Generic_FT_Cheat_Sheet.pdf'>Generic 40&ndash;99% sheet (PDF)</a>"
-           "<a href='Opponent_FT_Report.pdf'>All opponents (PDF)</a>"
-           "<a href='FT_Data.xlsx'>All data (Excel)</a></div>"
+           "<a href='Opponent_FT_Report.pdf'>All opponents (PDF)</a></div>"
            "<h2>Schedule</h2><table><tr><th>Date</th><th></th><th>Opponent</th><th>Team PPP</th>"
            "<th>Report</th></tr>" + "".join(rows) + "</table></body></html>")
     path = OUT_DIR / "index.html"
@@ -505,6 +499,7 @@ def main():
                     help="FTA this season before using season FT%% instead of career (default 20)")
     ap.add_argument("--min-games", type=int, default=8,
                     help="team games this season before using this season's PPP (default 8)")
+    ap.add_argument("--no-excel", action="store_true", help="skip FT_Data.xlsx (used for the website)")
     ap.add_argument("--out", help="folder to write everything to (default: this script's folder)")
     args = ap.parse_args()
 
@@ -524,7 +519,8 @@ def main():
         except Exception as e:  # keep going; HTML is still usable
             print(f"  PDF failed for {p.name}: {e}")
     try:
-        print("Wrote", write_excel(teams, players))
+        if not args.no_excel:
+            print("Wrote", write_excel(teams, players))
     except PermissionError:
         print("Could not write FT_Data.xlsx - close it in Excel and re-run.")
     print("Wrote", write_index(season_label, games, teams, team_paths))
