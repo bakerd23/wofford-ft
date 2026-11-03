@@ -679,7 +679,7 @@ INDEX_CSS = f"""
 
 # Notes shown under an opponent's name on the schedule page (ESPN team id -> text).
 TEAM_NOTES = {
-    "3229": "Stats to be added manually closer to game day",   # Virginia-Lynchburg (site blocks automated access)
+    "3229": "NCCAA - stats not available until closer to game day",   # Virginia-Lynchburg (site blocks automated access)
 }
 
 
