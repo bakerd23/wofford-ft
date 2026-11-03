@@ -452,8 +452,9 @@ tbody tr td.bad{{background:#f5d0d0;color:#7f1d1d}}
 .legend{{display:flex;justify-content:center;flex-wrap:wrap;gap:6px 16px;margin:14px auto 0;font-size:10.5px;color:#444}}
 .chip{{display:inline-block;width:12px;height:12px;border-radius:2px;vertical-align:-2px;margin-right:4px}}
 .foot{{text-align:center;font-size:9.5px;color:#999;margin-top:8px;border-top:1px solid {GOLD};padding-top:5px}}
-.cols{{display:flex;justify-content:center;gap:22px}}
-.cols td{{font-size:12.5px;padding:2.5px 14px}}
+.cols{{display:flex;justify-content:center;gap:56px}}
+.cols th{{font-size:12px;padding:9px 18px}}
+.cols td{{font-size:15px;padding:0 24px;height:27.5px}}
 .cols tr.ten td{{border-top:2px solid {GOLD}}}
 @page{{size:letter;margin:0.4in}}
 @media print{{.sheet{{padding:0;break-after:page}} .sheet:last-child{{break-after:auto}} .noprint{{display:none}}}}
@@ -518,7 +519,7 @@ LANDSCAPE_CSS = f"""
 .side .tile{{{{min-width:0;padding:5px 10px}}}}
 .side .nodata{{{{text-align:left;margin:12px 0 0;font-size:10.5px}}}}
 .side .legend{{{{flex-direction:column;align-items:flex-start;margin:12px 0 0;gap:5px}}}}
-.main table td{{{{padding:4px 11px}}}}
+.main table td{{{{padding:0 12px;height:var(--rh,30px)}}}}
 @media screen and (max-width:760px){{{{.body{{{{flex-direction:column;align-items:stretch}}}} .side{{{{width:auto}}}}
   .side .tiles{{{{flex-direction:row}}}} .main{{{{overflow-x:auto}}}}}}}}
 """.replace("{{", "{").replace("}}", "}")
@@ -564,7 +565,9 @@ def _team_sheet(t, roster, season_label, updated):
     out.append(_legend() + "</aside><div class='main'>")
 
     if have:
-        out.append("<table><thead><tr><th>#</th><th>Player</th><th>Pos</th><th>Yr</th>"
+        rh = max(28, min(62, 545 // len(have)))          # px per row: short rosters get taller rows
+        fs = 17 if rh >= 52 else 15.5 if rh >= 40 else 14.5 if rh >= 33 else 13.5
+        out.append(f"<table style='--rh:{rh}px;font-size:{fs}px'><thead><tr><th>#</th><th>Player</th><th>Pos</th><th>Yr</th>"
                    f"<th>{season_label}</th><th>Career</th><th>FT%</th>"
                    "<th>1-and-1</th><th>2 Shots</th></tr></thead><tbody>")
         for p in have:
