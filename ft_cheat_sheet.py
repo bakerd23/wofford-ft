@@ -33,6 +33,7 @@ import concurrent.futures as cf
 import datetime as dt
 import difflib
 import html
+import io
 import re
 import shutil
 import subprocess
@@ -227,6 +228,99 @@ def match_tr_slug(espn_id, espn_display_name, tr_slugs):
 
 
 # ----------------------------------------------------------------------------
+# Non-D1 opponents: Sidearm Sports school stats pages
+# ----------------------------------------------------------------------------
+# ESPN team id -> school stats page. Add a season with /<season> (e.g. .../stats/2025-26).
+SIDEARM_SOURCES = {
+    "2019": "https://auyellowjackets.com/sports/mens-basketball/stats",     # Allen
+    "2679": "https://voorheesathletics.com/sports/mens-basketball/stats",   # Voorhees
+}
+SIDEARM_SEASONS_BACK = 4      # seasons at that school summed for "career"
+
+
+def _flat(df):
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = [b for a, b in df.columns]
+    return df
+
+
+def _first_last(name):
+    """'Williams , Syris' -> 'Syris Williams'"""
+    if "," in name:
+        last, first = name.split(",", 1)
+        name = f"{first.strip()} {last.strip()}"
+    return " ".join(name.split())
+
+
+def _name_key(name):
+    name = name.strip()
+    if "," in name:                                  # "Johnson, Jordahn" -> "Jordahn Johnson"
+        last, first = name.split(",", 1)
+        name = f"{first} {last}"
+    toks = re.sub(r"[^a-z ]", "", name.lower()).split()
+    return " ".join(t for t in toks if t not in {"jr", "sr", "ii", "iii", "iv"})
+
+
+def sidearm_season(base, season):
+    """Players' FT totals and team possession stats for one season, or None if no stats."""
+    r = get(f"{base}/{season}")
+    if r is None:
+        return None
+    try:
+        tables = [_flat(t) for t in pd.read_html(io.StringIO(r.text))]
+    except ValueError:                               # season page exists but has no stats yet
+        return None
+    ind = next((t for t in tables if {"#", "Player", "FTM", "FTA"} <= set(t.columns)), None)
+    log = next((t for t in tables if {"Opponent", "Date", "FGM/A", "FTM/A", "OFF", "TO", "PTS"} <= set(t.columns)),
+               None)
+    if ind is None or log is None:
+        return None
+    players = {}
+    for _, row in ind.iterrows():
+        raw = str(row["Player"])
+        if row["#"] in ("TM",) or pd.isna(row["#"]) or raw in ("Total", "Opponents"):
+            continue
+        display = _first_last(re.split(r"\s+\d{1,2}\s+", raw)[0])   # "Last, First  22 Last, First"
+        # schools sometimes list one player on several rows (split stat entries) - add them up
+        p = players.setdefault(_name_key(display), {"jersey": str(row["#"]).lstrip("0") or "0",
+                                                    "name": display, "ftm": 0, "fta": 0})
+        p["ftm"] += int(row["FTM"])
+        p["fta"] += int(row["FTA"])
+    games = log[log["Date"].notna()]
+    tot = log[log["Date"].isna() & (log["Opponent"] != "Opponents")].iloc[0]
+    fga, fta = int(str(tot["FGM/A"]).split("-")[1]), int(str(tot["FTM/A"]).split("-")[1])
+    poss = fga - int(tot["OFF"]) + int(tot["TO"]) + 0.475 * fta
+    team = {"season": season, "gp": len(games), "pts": int(tot["PTS"]),
+            "ppp": round(int(tot["PTS"]) / poss, 3) if poss else None}
+    return {"players": players, "team": team}
+
+
+def load_sidearm(base, season_label):
+    start = int(season_label[:4])
+    seasons = [f"{y}-{str(y + 1)[2:]}" for y in range(start, start - SIDEARM_SEASONS_BACK, -1)]
+    data = {s: sidearm_season(base, s) for s in seasons}
+    return {"seasons": data, "team": {s: d["team"] for s, d in data.items() if d}}
+
+
+def sidearm_roster_ft(espn_roster, sidearm, season_label):
+    """Yield (player, (season_ftm, season_fta, career_ftm, career_fta)) for each player on the roster.
+    Uses ESPN's roster, plus anyone in this season's school stats who isn't on it."""
+    seasons = {s: d["players"] for s, d in sidearm["seasons"].items() if d}
+    cur = seasons.get(season_label, {})
+    roster = list(espn_roster)
+    have = {_name_key(p["name"]) for p in roster}
+    for key, sp in cur.items():
+        if key not in have:
+            roster.append({"id": "", "name": sp["name"], "jersey": sp["jersey"], "pos": "", "class": ""})
+    for p in roster:
+        key = _name_key(p["name"])
+        s = cur.get(key, {"ftm": 0, "fta": 0})
+        c_m = sum(d[key]["ftm"] for d in seasons.values() if key in d)
+        c_a = sum(d[key]["fta"] for d in seasons.values() if key in d)
+        yield p, (s["ftm"], s["fta"], c_m, c_a)
+
+
+# ----------------------------------------------------------------------------
 # Main build
 # ----------------------------------------------------------------------------
 def build(min_fta, min_games):
@@ -273,8 +367,17 @@ def build(min_fta, min_games):
             "ppp": round(ppg / pace, 3) if ppg and pace else None,   # points per possession
             "ppp_season": season_label if use_now else PRIOR_SEASON_LABEL,
         })
+        sidearm = None
+        if opp["id"] in SIDEARM_SOURCES:      # non-D1: school's own stats site
+            sidearm = load_sidearm(SIDEARM_SOURCES[opp["id"]], season_label)
+            cur, prior = sidearm["team"].get(season_label), sidearm["team"].get(PRIOR_SEASON_LABEL)
+            pick = cur if cur and cur["gp"] >= min_games else (prior or cur)
+            if pick:
+                opp.update({"ppp": pick["ppp"], "ppg": None, "pace": None, "games_played": cur["gp"] if cur else 0,
+                            "ppp_season": pick["season"], "tr_name": "school site"})
+        opp["sidearm"] = sidearm
         team_rows.append(opp)
-        print(f'  {opp["name"]:<35} -> TR: {opp["tr_name"] or "NOT FOUND":<18} '
+        print(f'  {opp["name"]:<35} -> {opp["tr_name"] or "NOT FOUND":<18} '
               f'PPP {opp["ppp"] if opp["ppp"] is not None else "--"} ({opp["ppp_season"]}, {gp} GP)')
 
     print("Pulling rosters and free throw stats from ESPN ...")
@@ -282,16 +385,21 @@ def build(min_fta, min_games):
     jobs = []
     with cf.ThreadPoolExecutor(max_workers=6) as pool:
         for opp in team_rows:
-            for p in get_roster(opp["id"]):
-                jobs.append((opp, p, pool.submit(get_player_ft, p["id"], season_label)))
+            roster = get_roster(opp["id"])
+            if opp["sidearm"]:
+                for p, ft in sidearm_roster_ft(roster, opp["sidearm"], season_label):
+                    jobs.append((opp, p, ft))
+            else:
+                for p in roster:
+                    jobs.append((opp, p, pool.submit(get_player_ft, p["id"], season_label)))
         for opp, p, fut in jobs:
-            s_m, s_a, c_m, c_a = fut.result()
+            s_m, s_a, c_m, c_a = fut.result() if isinstance(fut, cf.Future) else fut
             if s_a >= min_fta:
                 pct, basis, fta_used = s_m / s_a, season_label, s_a
             elif c_a > 0:
                 pct, basis, fta_used = c_m / c_a, "Career", c_a
             else:
-                pct, basis, fta_used = None, "No D1 FT data", 0
+                pct, basis, fta_used = None, "No FT data", 0
             player_rows.append({
                 "team_id": opp["id"], "team": opp["name"], **p,
                 "season_ft": f"{s_m}-{s_a}", "season_pct": s_m / s_a if s_a else None,
@@ -370,7 +478,9 @@ def logo_data_uri(team_id):
 
 def _logo(team_id):
     uri = logo_data_uri(team_id)
-    return f"<div class='logo'>{f'<img src={chr(39)}{uri}{chr(39)}>' if uri else ''}</div>"
+    if not uri:
+        return "<div class='logo' style='visibility:hidden'></div>"   # keeps the title centered
+    return f"<div class='logo'><img src='{uri}'></div>"
 
 
 def f3(x):
@@ -387,10 +497,26 @@ def cmp_class(epp, ppp):
     return "good" if epp < ppp else "bad"
 
 
-def _page(title, body):
+# Team sheets print landscape: stat boxes + key in a left column, roster table on the right.
+LANDSCAPE_CSS = f"""
+@page{{{{size:letter landscape;margin:0.35in}}}}
+.sheet{{{{max-width:10.2in}}}}
+.body{{{{display:flex;gap:20px;align-items:flex-start;justify-content:center;margin-top:14px}}}}
+.side{{{{width:2.35in;flex:none}}}}
+.side .tiles{{{{flex-direction:column;margin:0;gap:9px}}}}
+.side .tile{{{{min-width:0;padding:5px 10px}}}}
+.side .nodata{{{{text-align:left;margin:12px 0 0;font-size:10.5px}}}}
+.side .legend{{{{flex-direction:column;align-items:flex-start;margin:12px 0 0;gap:5px}}}}
+.main table td{{{{padding:4px 11px}}}}
+@media screen and (max-width:760px){{{{.body{{{{flex-direction:column;align-items:stretch}}}} .side{{{{width:auto}}}}
+  .side .tiles{{{{flex-direction:row}}}} .main{{{{overflow-x:auto}}}}}}}}
+""".replace("{{", "{").replace("}}", "}")
+
+
+def _page(title, body, extra_css=""):
     return (f"<!DOCTYPE html><html><head><meta charset='utf-8'>"
             f"<meta name='viewport' content='width=device-width,initial-scale=1'>"
-            f"<title>{html.escape(title)}</title><style>{CSS}</style></head><body>{body}</body></html>")
+            f"<title>{html.escape(title)}</title><style>{CSS}{extra_css}</style></head><body>{body}</body></html>")
 
 
 def _legend():
@@ -414,13 +540,17 @@ def _team_sheet(t, roster, season_label, updated):
            "<div class='kicker'>Wofford Basketball &middot; Free Throw Foul Sheet</div>"
            f"<div class='opp'>{html.escape(t['name'])}</div>"
            f"<div class='sub'>{' &nbsp;&middot;&nbsp; '.join(t['games'])}</div></div>{_logo(t['id'])}</header>",
-           "<div class='tiles'>"
+           "<div class='body'><aside class='side'><div class='tiles'>"
            f"<div class='tile'><div class='l'>Points / Possession</div><div class='v'>{f3(ppp)}</div>"
            f"<div class='s'>{t['ppp_season'] if ppp else 'not available'}</div></div>"
            f"<div class='tile'><div class='l'>Foul on 1-and-1</div><div class='v'>{n11 if ppp else '--'}</div>"
            "<div class='s'>players</div></div>"
            f"<div class='tile'><div class='l'>Foul on 2 shots</div><div class='v'>{n2 if ppp else '--'}</div>"
            "<div class='s'>players</div></div></div>"]
+    if none:
+        names = ", ".join(f"#{html.escape(p['jersey'])} {html.escape(p['name'])}" for p in none)
+        out.append(f"<div class='nodata'><b>No free throw data yet:</b> {names}</div>")
+    out.append(_legend() + "</aside><div class='main'>")
 
     if have:
         out.append("<table><thead><tr><th>#</th><th>Player</th><th>Pos</th><th>Yr</th>"
@@ -439,11 +569,7 @@ def _team_sheet(t, roster, season_label, updated):
         out.append("</tbody></table>")
     elif not roster:
         out.append("<p class='nodata'>No roster available on ESPN.</p>")
-
-    if none:
-        names = ", ".join(f"#{html.escape(p['jersey'])} {html.escape(p['name'])}" for p in none)
-        out.append(f"<div class='nodata'><b>No D1 free throw data yet:</b> {names}</div>")
-    out.append(_legend())
+    out.append("</div></div>")
     out.append(f"<div class='foot'>Updated {updated}</div></section>")
     return "".join(out)
 
@@ -466,10 +592,11 @@ def write_report(season_label, teams, players, min_fta, min_games):
         sheet = _team_sheet(t, by_team.get(t["id"], []), season_label, updated)
         sheets.append(sheet)
         tp = team_dir / f"{_safe(t['name'])}.html"
-        tp.write_text(_page(f"Wofford FT Sheet - {t['name']}", sheet), encoding="utf-8")
+        tp.write_text(_page(f"Wofford FT Sheet - {t['name']}", sheet, LANDSCAPE_CSS), encoding="utf-8")
         team_paths.append(tp)
     path = OUT_DIR / "Opponent_FT_Report.html"
-    path.write_text(_page("Wofford FT Sheets - All Opponents", "".join(sheets)), encoding="utf-8")
+    path.write_text(_page("Wofford FT Sheets - All Opponents", "".join(sheets), LANDSCAPE_CSS),
+                    encoding="utf-8")
     return path, team_paths
 
 
