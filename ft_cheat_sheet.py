@@ -452,9 +452,12 @@ tbody tr td.bad{{background:#f5d0d0;color:#7f1d1d}}
 .legend{{display:flex;justify-content:center;flex-wrap:wrap;gap:6px 16px;margin:14px auto 0;font-size:10.5px;color:#444}}
 .chip{{display:inline-block;width:12px;height:12px;border-radius:2px;vertical-align:-2px;margin-right:4px}}
 .foot{{text-align:center;font-size:9.5px;color:#999;margin-top:8px;border-top:1px solid {GOLD};padding-top:5px}}
-.cols{{display:flex;justify-content:center;gap:56px}}
-.cols th{{font-size:12px;padding:9px 18px}}
-.cols td{{font-size:15px;padding:0 24px;height:27.5px}}
+.cols{{display:flex;justify-content:center;gap:16px}}
+.cols th{{font-size:10px;padding:5px 7px;letter-spacing:.4px}}
+.cols th.grp{{font-size:11px;border-bottom:1px solid {GOLD}}}
+.cols td{{font-size:12.5px;padding:0 6px;height:25.5px}}
+.cols td.pts{{font-weight:700}}
+.cols .gl{{border-left:2px solid {GOLD}}}
 .cols tr.ten td{{border-top:2px solid {GOLD}}}
 @page{{size:letter;margin:0.4in}}
 @media print{{.sheet{{padding:0;break-after:page}} .sheet:last-child{{break-after:auto}} .noprint{{display:none}}}}
@@ -646,10 +649,16 @@ def write_generic():
     half = len(rows) // 2
 
     def table(chunk):
-        t = ["<table><thead><tr><th>FT%</th><th>1-and-1</th><th>2 Shots</th></tr></thead><tbody>"]
+        # 2P% / 3P% = field goal percentage worth the same points per possession
+        t = ["<table><thead><tr><th rowspan='2'>FT%</th><th colspan='3' class='grp'>1-and-1</th>"
+             "<th colspan='3' class='grp'>2 Shots</th></tr>"
+             "<tr><th>Pts</th><th>2P%</th><th>3P%</th><th class='gl'>Pts</th><th>2P%</th><th>3P%</th></tr>"
+             "</thead><tbody>"]
         for p, a, b in chunk:
             cls = " class='ten'" if p % 10 == 0 and p not in (40, 70) else ""
-            t.append(f"<tr{cls}><td class='num'>{p}%</td><td>{a:.3f}</td><td>{b:.3f}</td></tr>")
+            t.append(f"<tr{cls}><td class='num'>{p}%</td>"
+                     f"<td class='pts'>{a:.3f}</td><td>{a / 2:.1%}</td><td>{a / 3:.1%}</td>"
+                     f"<td class='pts gl'>{b:.3f}</td><td>{b / 2:.1%}</td><td>{b / 3:.1%}</td></tr>")
         t.append("</tbody></table>")
         return "".join(t)
 
@@ -657,7 +666,8 @@ def write_generic():
             f"<header class='band'>{_logo(WOFFORD_ESPN_ID)}<div class='titles'>"
             "<div class='kicker'>Wofford Basketball &middot; Free Throw Cheat Sheet</div>"
             "<div class='opp'>Expected Points per Trip</div>"
-            "<div class='sub'>Foul when the shooter's number is below the opponent's points per possession</div>"
+            "<div class='sub'>Foul when Pts is below the opponent's points per possession "
+            "&middot; 2P% / 3P% = shooting % worth the same points</div>"
             f"</div>{_logo(WOFFORD_ESPN_ID)}</header>"
             "<div style='height:14px'></div>"
             f"<div class='cols'>{table(rows[:half])}{table(rows[half:])}</div></section>")
