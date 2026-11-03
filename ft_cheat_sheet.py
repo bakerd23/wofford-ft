@@ -461,15 +461,26 @@ tbody tr td.bad{{background:#f5d0d0;color:#7f1d1d}}
 
 _LOGO_CACHE = {}
 
+# Teams ESPN has no logo for (ESPN team id -> image URL)
+LOGO_OVERRIDES = {
+    "2679": "https://voorheesathletics.com/images/logos/site/site.png?width=120",   # Voorhees
+}
+
+
+def logo_url(team_id):
+    return LOGO_OVERRIDES.get(team_id, f"https://a.espncdn.com/i/teamlogos/ncaa/500/{team_id}.png")
+
 
 def logo_data_uri(team_id):
     """ESPN team logo as an embedded image (so PDFs never miss it). None if unavailable."""
     if team_id not in _LOGO_CACHE:
         uri = None
         try:
-            r = get(f"https://a.espncdn.com/combiner/i?img=/i/teamlogos/ncaa/500/{team_id}.png&h=120&w=120")
-            if r is not None and r.headers.get("content-type", "").startswith("image"):
-                uri = "data:image/png;base64," + base64.b64encode(r.content).decode()
+            r = get(LOGO_OVERRIDES.get(team_id) or
+                    f"https://a.espncdn.com/combiner/i?img=/i/teamlogos/ncaa/500/{team_id}.png&h=120&w=120")
+            ctype = r.headers.get("content-type", "").split(";")[0] if r is not None else ""
+            if ctype.startswith("image"):
+                uri = f"data:{ctype};base64," + base64.b64encode(r.content).decode()
         except Exception:
             pass
         _LOGO_CACHE[team_id] = uri
@@ -663,7 +674,13 @@ INDEX_CSS = f"""
 .sched a{{color:{GOLD_DARK};font-weight:800;text-decoration:none}}
 .sched tr.past td{{opacity:.45}}
 .sched tr.next td{{background:#fff4dc !important;font-weight:700}}
+.sched .note{{font-size:11.5px;font-style:italic;font-weight:400;color:{GOLD_DARK};margin:2px 0 0 34px}}
 """
+
+# Notes shown under an opponent's name on the schedule page (ESPN team id -> text).
+TEAM_NOTES = {
+    "3229": "Stats to be added manually closer to game day",   # Virginia-Lynchburg (site blocks automated access)
+}
 
 
 def write_index(season_label, games, teams, team_paths):
@@ -678,8 +695,10 @@ def write_index(season_label, games, teams, team_paths):
         cls = "past" if g["date"] < today else ("next" if g["date"] == next_date else "")
         rows.append(
             f"<tr class='{cls}'><td>{g['tip'].strftime('%a %b')} {g['tip'].day}</td><td>{g['site']}</td>"
-            f"<td class='l'><img src='https://a.espncdn.com/i/teamlogos/ncaa/500/{g['opp_id']}.png' alt='' onerror=\"this.style.visibility='hidden'\">"
-            f"{html.escape(g['opp_name'])}</td><td>{f3(ppp[g['opp_id']])}</td>"
+            f"<td class='l'><img src='{logo_url(g['opp_id'])}' alt='' onerror=\"this.style.visibility='hidden'\">"
+            f"{html.escape(g['opp_name'])}"
+            + (f"<div class='note'>{html.escape(TEAM_NOTES[g['opp_id']])}</div>" if g["opp_id"] in TEAM_NOTES else "")
+            + f"</td><td>{f3(ppp[g['opp_id']])}</td>"
             f"<td><a href='{href}.pdf'>PDF</a> &nbsp;&middot;&nbsp; <a href='{href}.html'>View</a></td></tr>")
     body = (f"<style>{INDEX_CSS}</style><div class='wrap'>"
             f"<header class='band'>{_logo(WOFFORD_ESPN_ID)}<div class='titles'>"
